@@ -1,122 +1,107 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jul 16 22:12:49 2025
-@author: admin
-"""
-
 import cv2
-import imutils
 import numpy as np
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from ultralytics import YOLO
+from collections import Counter
 
-# Load the YOLOv8 model
-model_names = YOLO('yolov8n.pt')
+# Load YOLOv8 model
+model = YOLO("yolov8n.pt")
 
-# Load the trained MobileNetV2 classifier
-print("[INFO] loading model...")
-model = load_model("messy_clean_detector.h5")
+# Define messy items to look for
+messy_objects = ['cup', 'bottle', 'chair', 'book', 'backpack', 'suitcase', 'sports ball', 'tv', 'remote']
 
-# Start webcam video stream
-print("[INFO] starting video stream...")
-vs = cv2.VideoCapture(0)
+# Open webcam
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("❌ Error: Could not open webcam.")
+    exit()
 
-# Define known messy objects from YOLO COCO classes
-messy_objects = ['cup', 'bottle', 'chair', 'book', 'backpack', 'suitcase', 'teddy bear', 'tv', 'remote']
-
+# Video writer settings
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
-out = cv2.VideoWriter('Clean_output.avi', fourcc, 20.0, (640, 480))
+out = cv2.VideoWriter('output_messy_room.avi', fourcc, 20.0, (640, 480))
+
+# Track all seen items and messy items
+all_detected_items = Counter()
+all_messy_items = Counter()
+final_frame = None
 
 while True:
-    ret, frame = vs.read()
+    ret, frame = cap.read()
     if not ret:
+        print("❌ Error: Frame not received.")
         break
 
-    # Run YOLO object detection
-    results = model_names.predict(source=frame, conf=0.4, verbose=False)
+    frame = cv2.resize(frame, (640, 480))
+    results = model.predict(source=frame, conf=0.3, verbose=False)
     boxes = results[0].boxes
-    names = model_names.names
+    names = model.names
 
-    detected_messy_items = []
-    mess_count = 0
+    current_items = []
+    current_messy = []
 
     for box in boxes:
-        cls_id = int(box.cls[0])
-        label = names[cls_id]
-        if label in messy_objects:
-            mess_count += 1
-            detected_messy_items.append(label)
+        cls_id = int(box.cls[0].item())
+        name = names[cls_id]
+        current_items.append(name)
+        if name in messy_objects:
+            current_messy.append(name)
 
-    # Estimate mess score
-    mess_score = max(0, 100 - mess_count * 10)
+    all_detected_items.update(current_items)
+    all_messy_items.update(current_messy)
 
-    # Create annotated frame with boxes
-    annotated_frame = results[0].plot()
+    # Annotate frame
+    annotated = results[0].plot()
 
-    # Add mess score text
-    cv2.putText(annotated_frame, f'Mess Score: {mess_score}/100', (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+    # Mess score (arbitrary)
+    mess_score = max(0, 100 - len(current_messy) * 10)
+    cv2.putText(annotated, f"Mess Score: {mess_score}/100", (20, 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-    # Display messy object names on the screen
-    #y_offset = 70
-    #cv2.putText(annotated_frame, "Detected Messy Items:", (20, y_offset),
-                #cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-    #for i, item in enumerate(set(detected_messy_items)):
-        #cv2.putText(annotated_frame, f"- {item}", (30, y_offset + (25 * (i + 1))),
-                    #cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        
-        # Display messy object names or "Clean" status on the screen
-    y_offset = 70
-    if detected_messy_items:
-        messy_list = list(set(detected_messy_items))
-        cv2.putText(annotated_frame, f"Messy Items ({len(messy_list)}):", (20, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        for i, item in enumerate(messy_list):
-            cv2.putText(annotated_frame, f"- {item}", (30, y_offset + (25 * (i + 1))),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-    else:
-        cv2.putText(annotated_frame, "No messy items detected - Clean", (20, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    # Show all detected items
+    cv2.putText(annotated, "Detected Items:", (20, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    y_offset = 85
+    for i, item in enumerate(sorted(set(current_items))):
+        color = (0, 255, 255) if item in current_messy else (180, 180, 180)
+        cv2.putText(annotated, f"- {item}", (30, y_offset + (25 * i)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-    # Resize and preprocess the frame for MobileNet
-    frame_resized = imutils.resize(frame, width=400)
-    image = cv2.resize(frame_resized, (224, 224))
-    image = img_to_array(image)
-    image = preprocess_input(image)
-    image = np.expand_dims(image, axis=0)
+    # Show "Room is Clean" if no messy items
+    if not current_messy:
+        cv2.putText(annotated, "Room is Clean", (20, y_offset + 30 + len(current_items) * 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-        # Predict using MobileNetV2 (messy or clean)
-    (pred_clean, pred_messy) = model.predict(image)[0]  # <-- FIXED ORDER
-    label = "Messy" if pred_messy > pred_clean else "Clean"
-    confidence = max(pred_messy, pred_clean) * 100
-    
-    # Optional Debug Print
-    print(f"MobileNet Predictions => Clean: {pred_clean:.4f}, Messy: {pred_messy:.4f}")
-    
-    # Draw the label and bounding box on MobileNet frame
-    color = (0, 0, 255) if label == "Messy" else (0, 255, 0)
-    text = f"{label}: {confidence:.2f}%"
-    cv2.putText(frame_resized, text, (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-    cv2.rectangle(frame_resized, (5, 5), (395, 295), color, 2)
-# Write to output video file
-    out.write(annotated_frame)
-    # Show both outputs
-    cv2.imshow("YOLOv8 - Messy Room Detector", annotated_frame)
-    cv2.imshow("Room Status - MobileNetV2", frame_resized)
-    
-    
-   
-    
-    
+    final_frame = annotated.copy()
+    out.write(annotated)
+    cv2.imshow("Messy Room Detector", annotated)
 
-    key = cv2.waitKey(1) & 0xFF
-    if key == ord("q"):
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        print("🛑 Video stopped by user.")
         break
 
+# Show final summary
+if final_frame is not None:
+    summary = final_frame.copy()
+    cv2.putText(summary, "FINAL SUMMARY", (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+
+    y_offset = 70
+    cv2.putText(summary, "All Items Seen:", (20, y_offset),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+    for i, (item, count) in enumerate(sorted(all_detected_items.items())):
+        color = (0, 255, 255) if item in all_messy_items else (180, 180, 180)
+        cv2.putText(summary, f"- {item}: {count}x", (30, y_offset + 30 + i * 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
+    if not all_messy_items:
+        cv2.putText(summary, "Room was always clean!", (20, y_offset + 200),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+    cv2.imshow("Final Summary", summary)
+    cv2.waitKey(5000)
+
 # Cleanup
-vs.release()
+cap.release()
 out.release()
 cv2.destroyAllWindows()
+print("✅ Video saved as 'output_messy_room.avi'")
