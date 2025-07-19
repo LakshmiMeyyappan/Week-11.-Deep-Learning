@@ -1,5 +1,4 @@
 import cv2
-import numpy as np
 from ultralytics import YOLO
 from collections import Counter
 
@@ -12,7 +11,7 @@ messy_objects = ['cup', 'bottle', 'chair', 'book', 'backpack', 'suitcase', 'spor
 # Open webcam
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
-    print("❌ Error: Could not open webcam.")
+    print("Error: Could not open webcam.")
     exit()
 
 # Video writer settings
@@ -27,7 +26,7 @@ final_frame = None
 while True:
     ret, frame = cap.read()
     if not ret:
-        print("❌ Error: Frame not received.")
+        print("Error: Frame not received.")
         break
 
     frame = cv2.resize(frame, (640, 480))
@@ -75,7 +74,7 @@ while True:
     cv2.imshow("Messy Room Detector", annotated)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
-        print("🛑 Video stopped by user.")
+        print("Video stopped by user.")
         break
 
 # Show final summary
@@ -104,4 +103,4 @@ if final_frame is not None:
 cap.release()
 out.release()
 cv2.destroyAllWindows()
-print("✅ Video saved as 'output_messy_room.avi'")
+print(" Video saved as 'Output_MessyRoom.avi'")
